@@ -22,8 +22,7 @@ namespace Microsoft.NetCore.Analyzers.Security
     class DoNotDisableHttpClientCRLCheck : DiagnosticAnalyzer
     {
         internal static DiagnosticDescriptor DefinitelyDisableHttpClientCRLCheckRule = SecurityHelpers.CreateDiagnosticDescriptor(
-            "CA5397",
-            typeof(MicrosoftNetCoreAnalyzersResources),
+            "CA5399",
             nameof(MicrosoftNetCoreAnalyzersResources.DefinitelyDisableHttpClientCRLCheck),
             nameof(MicrosoftNetCoreAnalyzersResources.DefinitelyDisableHttpClientCRLCheckMessage),
             DiagnosticHelpers.EnabledByDefaultIfNotBuildingVSIX,
@@ -31,8 +30,7 @@ namespace Microsoft.NetCore.Analyzers.Security
             descriptionResourceStringName: nameof(MicrosoftNetCoreAnalyzersResources.DoNotDisableHttpClientCRLCheckDescription),
             customTags: WellKnownDiagnosticTagsExtensions.DataflowAndTelemetry);
         internal static DiagnosticDescriptor MaybeDisableHttpClientCRLCheckRule = SecurityHelpers.CreateDiagnosticDescriptor(
-            "CA5398",
-            typeof(MicrosoftNetCoreAnalyzersResources),
+            "CA5400",
             nameof(MicrosoftNetCoreAnalyzersResources.MaybeDisableHttpClientCRLCheck),
             nameof(MicrosoftNetCoreAnalyzersResources.MaybeDisableHttpClientCRLCheckMessage),
             DiagnosticHelpers.EnabledByDefaultIfNotBuildingVSIX,
@@ -94,7 +92,9 @@ namespace Microsoft.NetCore.Analyzers.Security
                         return;
                     }
 
-                    if (typeToTrackMetadataNames.Any(s => !wellKnownTypeProvider.TryGetTypeByMetadataName(s, out _)))
+                    var trackTypes = typeToTrackMetadataNames.Where(s => wellKnownTypeProvider.TryGetTypeByMetadataName(s, out _));
+
+                    if (!trackTypes.Any())
                     {
                         return;
                     }
@@ -163,7 +163,7 @@ namespace Microsoft.NetCore.Analyzers.Security
                                         compilationAnalysisContext.Compilation,
                                         rootOperationsNeedingAnalysis,
                                         compilationAnalysisContext.Options,
-                                        typeToTrackMetadataNames,
+                                        trackTypes.ToImmutableHashSet(),
                                         ConstructorMapper,
                                         PropertyMappers,
                                         HazardousUsageEvaluators,

@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Diagnostics;
 using System.Linq;
+using Analyzer.Utilities.Extensions;
 using Analyzer.Utilities.PooledObjects;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.FlowAnalysis;
@@ -212,7 +213,7 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.PropertySetAnalysis
                 }
                 else
                 {
-                    if (TryFindNonTrackedTypeHazardousUsageEvaluator(operation.Constructor, operation, operation.Arguments, out var hazardousUsageEvaluator, out var propertySetInstance))
+                    if (TryFindNonTrackedTypeHazardousUsageEvaluator(operation.Constructor, operation, operation.Arguments, out HazardousUsageEvaluator hazardousUsageEvaluator, out IOperation propertySetInstance))
                     {
                         this.EvaluatePotentialHazardousUsage(
                             operation.Syntax,
@@ -492,7 +493,7 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.PropertySetAnalysis
                 // or for a method within a different type.
                 IOperation propertySetInstance = visitedInstance;
                 if ((visitedInstance != null
-                    && this.TrackedTypeSymbols.Contains(visitedInstance.Type)
+                    && visitedInstance.Type.GetBaseTypesAndThis().Any(s => this.TrackedTypeSymbols.Contains(s))
                     && this.DataFlowAnalysisContext.HazardousUsageEvaluators.TryGetHazardousUsageEvaluator(method.MetadataName, out var hazardousUsageEvaluator))
                     || TryFindNonTrackedTypeHazardousUsageEvaluator(method, visitedInstance, visitedArguments, out hazardousUsageEvaluator, out propertySetInstance))
                 {
@@ -513,7 +514,7 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.PropertySetAnalysis
             /// <summary>
             /// Find the hazardous usage evaluator for the non tracked type.
             /// </summary>
-            /// <param name="method">The petential hazardous method.</param>
+            /// <param name="method">The potential hazardous method.</param>
             /// <param name="visitedInstance">Instance of this invocation.</param>
             /// <param name="visitedArguments">IArgumentOperations of this invocation.</param>
             /// <param name="evaluator">Target evaluator.</param>
@@ -522,28 +523,28 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.PropertySetAnalysis
             {
                 evaluator = null;
                 instance = null;
-                if (!this.DataFlowAnalysisContext.HazardousUsageTypesToNames.TryGetValue(
-                        visitedInstance?.Type as INamedTypeSymbol ?? method.ContainingType,
-                        out string containingTypeName))
+                string containingTypeName = null;
+                if ((visitedInstance?.Type as INamedTypeSymbol ?? method.ContainingType)
+                    .GetBaseTypesAndThis()
+                    .Any(s =>
+                        this.DataFlowAnalysisContext.HazardousUsageTypesToNames.TryGetValue(s, out containingTypeName)))
                 {
-                    return false;
-                }
-
-                // This doesn't handle the case of multiple instances of the type being tracked.
-                // If that's needed one day, will need to extend this.
-                foreach (IArgumentOperation argumentOperation in visitedArguments)
-                {
-                    IOperation value = argumentOperation.Value;
-                    ITypeSymbol argumentTypeSymbol = value is IConversionOperation conversionOperation ? conversionOperation.Operand.Type : value.Type;
-                    if (this.TrackedTypeSymbols.Contains(argumentTypeSymbol)
-                        && this.DataFlowAnalysisContext.HazardousUsageEvaluators.TryGetHazardousUsageEvaluator(
-                                containingTypeName,
-                                method.MetadataName,
-                                argumentOperation.Parameter.MetadataName,
-                                out evaluator))
+                    // This doesn't handle the case of multiple instances of the type being tracked.
+                    // If that's needed one day, will need to extend this.
+                    foreach (IArgumentOperation argumentOperation in visitedArguments)
                     {
-                        instance = argumentOperation.Value;
-                        return true;
+                        IOperation value = argumentOperation.Value;
+                        ITypeSymbol argumentTypeSymbol = value is IConversionOperation conversionOperation ? conversionOperation.Operand.Type : value.Type;
+                        if (this.TrackedTypeSymbols.Contains(argumentTypeSymbol)
+                            && this.DataFlowAnalysisContext.HazardousUsageEvaluators.TryGetHazardousUsageEvaluator(
+                                    containingTypeName,
+                                    method.MetadataName,
+                                    argumentOperation.Parameter.MetadataName,
+                                    out evaluator))
+                        {
+                            instance = argumentOperation.Value;
+                            return true;
+                        }
                     }
                 }
 

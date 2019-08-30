@@ -226,6 +226,39 @@ class TestClass
         }
 
         [Fact]
+        public void Test_DerivedClassOfHttpClient_DefinitelyDiagnostic()
+        {
+            this.VerifyCSharpWithDependencies(@"
+using System.Net.Http;
+
+class DerivedClass : HttpClient
+{
+    public DerivedClass()
+    {
+    }
+    
+    public DerivedClass(HttpMessageHandler handler)
+    {
+    }
+
+    public DerivedClass(HttpMessageHandler handler, bool disposeHandler)
+    {
+    }
+}
+
+class TestClass
+{
+    void TestMethod()
+    {
+        var winHttpHandler = new WinHttpHandler();
+        winHttpHandler.CheckCertificateRevocationList = false;
+        var httpClient = new HttpClient(winHttpHandler);
+    }
+}",
+                GetCSharpResultAt(10, 26, DefinitelyRule));
+        }
+
+        [Fact]
         public void Test_WinHttpHandler_CheckCertificateRevocationList_Right_NoDiagnostic()
         {
             this.VerifyCSharpWithDependencies(@"
