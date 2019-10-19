@@ -12,7 +12,7 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
     /// <remarks>It's bad if tainted data reaches a sink.</remarks>
     internal sealed class SinkInfo : ITaintedDataInfo, IEquatable<SinkInfo>
     {
-        public SinkInfo(string fullTypeName, ImmutableHashSet<SinkKind> sinkKinds, bool isInterface, bool isAnyStringParameterInConstructorASink, ImmutableHashSet<string> sinkProperties, ImmutableDictionary<string, ImmutableHashSet<string>> sinkMethodParameters)
+        public SinkInfo(string fullTypeName, ImmutableHashSet<SinkKind> sinkKinds, bool isInterface, bool isAnyStringParameterInConstructorASink, ImmutableHashSet<string> sinkProperties, ImmutableDictionary<string, ImmutableHashSet<string>> sinkMethodParameters, ImmutableDictionary<string, ImmutableHashSet<string>> sinkMethodParameters2)
         {
             FullTypeName = fullTypeName ?? throw new ArgumentNullException(nameof(fullTypeName));
             SinkKinds = sinkKinds ?? throw new ArgumentNullException(nameof(sinkKinds));
@@ -20,6 +20,7 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
             IsAnyStringParameterInConstructorASink = isAnyStringParameterInConstructorASink;
             SinkProperties = sinkProperties ?? throw new ArgumentNullException(nameof(sinkProperties));
             SinkMethodParameters = sinkMethodParameters ?? throw new ArgumentNullException(nameof(sinkMethodParameters));
+            SinkMethodParameters2 = sinkMethodParameters2 ?? throw new ArgumentNullException(nameof(sinkMethodParameters2));
         }
 
         /// <summary>
@@ -51,6 +52,8 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
         /// Mapping of method name to parameter names that are sinks.
         /// </summary>
         public ImmutableDictionary<string, ImmutableHashSet<string>> SinkMethodParameters { get; }
+
+        public ImmutableDictionary<string, ImmutableHashSet<string>> SinkMethodParameters2 { get; }
 
         /// <summary>
         /// Indicates that this <see cref="SinkInfo"/> uses <see cref="ValueContentAbstractValue"/>s.

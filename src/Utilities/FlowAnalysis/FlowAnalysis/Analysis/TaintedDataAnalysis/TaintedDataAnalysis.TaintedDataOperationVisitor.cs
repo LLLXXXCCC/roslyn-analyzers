@@ -241,6 +241,16 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
                         result = TaintedDataAbstractValue.NotTainted;
                         SetTaintedForEntity(visitedInstance, result);
                     }
+                    else if (visitedInstance != null && this.IsSanitizingArgumentMethod(method)) // the current point
+                    {
+                        for(var arg in visitedArguments)
+                        {
+                            CacheAbstractValue
+                        }
+                        CacheAbstractValue();
+                        result = TaintedDataAbstractValue.NotTainted;
+                        SetTaintedForEntity(visitedInstance, result);
+                    }
                     else if (this.DataFlowAnalysisContext.SourceInfos.IsSourceMethod(
                         method,
                         visitedArguments,
@@ -280,17 +290,24 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
                     {
                         foreach ((string ifTaintedParameter, string thenTaintedTarget) in taintedParameterPairs)
                         {
-                            IArgumentOperation thenTaintedTargetOperation = visitedArguments.FirstOrDefault(o => o.Parameter.Name == thenTaintedTarget);
-                            if (thenTaintedTargetOperation != null)
+                            if (thenTaintedTarget == TaintedTargetValue.Return)
                             {
-                                SetTaintedForEntity(
-                                    thenTaintedTargetOperation,
-                                    this.GetCachedAbstractValue(
-                                        visitedArguments.FirstOrDefault(o => o.Parameter.Name == ifTaintedParameter)));
+                                result = TaintedDataAbstractValue.CreateTainted(method, originalOperation.Syntax, this.OwningSymbol);
                             }
                             else
                             {
-                                Debug.Fail("Are the tainted data sources misconfigured?");
+                                IArgumentOperation thenTaintedTargetOperation = visitedArguments.FirstOrDefault(o => o.Parameter.Name == thenTaintedTarget);
+                                if (thenTaintedTargetOperation != null)
+                                {
+                                    SetTaintedForEntity(
+                                        thenTaintedTargetOperation,
+                                        this.GetCachedAbstractValue(
+                                            visitedArguments.FirstOrDefault(o => o.Parameter.Name == ifTaintedParameter)));
+                                }
+                                else
+                                {
+                                    Debug.Fail("Are the tainted data sources misconfigured?");
+                                }
                             }
                         }
                     }
@@ -373,7 +390,7 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
 
                 IArrayCreationOperation arrayCreationOperation = operation.GetAncestor<IArrayCreationOperation>(OperationKind.ArrayCreation);
                 if (arrayCreationOperation?.Type is IArrayTypeSymbol arrayTypeSymbol
-                    && this.DataFlowAnalysisContext.SourceInfos.IsSourceConstantArrayOfType(arrayTypeSymbol)
+                    && this.DataFlowAnalysisContext.SourceInfos.IsSourceConstantArrayOfType(arrayTypeSymbol) == ArrayKind.Constant
                     && operation.ElementValues.All(s => GetValueContentAbstractValue(s).IsLiteralState))
                 {
                     TaintedDataAbstractValue taintedDataAbstractValue = TaintedDataAbstractValue.CreateTainted(arrayTypeSymbol, arrayCreationOperation.Syntax, this.OwningSymbol);
@@ -430,11 +447,11 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
                 IEnumerable<IArgumentOperation> taintedArguments,
                 IOperation originalOperation)
             {
-                if (this.IsMethodArgumentASink(targetMethod, taintedArguments, out HashSet<SinkKind> sinkKinds))
+                if (this.IsMethodArgumentASink(targetMethod, taintedArguments, originalOperation, out HashSet<SinkKind> sinkKinds))
                 {
                     foreach (IArgumentOperation taintedArgument in taintedArguments)
                     {
-                        TaintedDataAbstractValue abstractValue = this.GetCachedAbstractValue(taintedArgument);
+                        TaintedDataAbstractValue abstractValue = this.GetCachedAbstractValue1(taintedArgument);
                         this.TrackTaintedDataEnteringSink(targetMethod, originalOperation.Syntax.GetLocation(), sinkKinds, abstractValue.SourceOrigins);
                     }
                 }
@@ -517,12 +534,30 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
             }
 
             /// <summary>
+            /// Determines if untaint the instance after calling the method.
+            /// </summary>
+            /// <param name="method">Instance method being called.</param>
+            /// <returns>True if untaint the instance, false otherwise.</returns>
+            private bool IsSanitizingArgumentMethod(IMethodSymbol method)
+            {
+                foreach (SanitizerInfo sanitizerInfo in this.DataFlowAnalysisContext.SanitizerInfos.GetInfosForType(method.ContainingType))
+                {
+                    if (sanitizerInfo.SanitizingArgumentMethods.Contains(method.MetadataName))
+                    {
+                        return true;
+                    }
+                }
+
+                return false;
+            }
+
+            /// <summary>
             /// Determines if tainted data passed as arguments to a method enters a tainted data sink.
             /// </summary>
             /// <param name="method">Method being invoked.</param>
             /// <param name="taintedArguments">Arguments passed to the method invocation that are tainted.</param>
             /// <returns>True if any of the tainted data arguments enters a sink, false otherwise.</returns>
-            private bool IsMethodArgumentASink(IMethodSymbol method, IEnumerable<IArgumentOperation> taintedArguments, out HashSet<SinkKind> sinkKinds)
+            private bool IsMethodArgumentASink(IMethodSymbol method, IEnumerable<IArgumentOperation> taintedArguments, IOperation originalOperation, out HashSet<SinkKind> sinkKinds)
             {
                 sinkKinds = null;
 
@@ -546,11 +581,17 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
                         lazySinkKinds.Value.UnionWith(sinkInfo.SinkKinds);
                     }
                     else if (sinkInfo.SinkMethodParameters.TryGetValue(method.MetadataName, out ImmutableHashSet<string> sinkParameters)
-                        && taintedArguments.Any(a => sinkParameters.Contains(a.Parameter.MetadataName)))
+                        && taintedArguments.Any(a => sinkParameters.Contains(a.Parameter.MetadataName))
+                        || originalOperation is IInvocationOperation invocationOperation
+                             && AnalysisEntityFactory.TryCreate(invocationOperation.Instance, out AnalysisEntity analysisEntity)
+                             && this.CurrentAnalysisData.TryGetValue(analysisEntity, out TaintedDataAbstractValue value)
+                             && value.Kind == TaintedDataAbstractValueKind.Tainted
+                             && sinkInfo.SinkMethodParameters2.TryGetValue(method.MetadataName, out ImmutableHashSet<string> sinkParameters2)
+                             && taintedArguments.Any(a => sinkParameters2.Contains(a.Parameter.MetadataName)))
                     {
                         lazySinkKinds.Value.UnionWith(sinkInfo.SinkKinds);
                     }
-                }
+                }   
 
                 if (lazySinkKinds.IsValueCreated)
                 {
@@ -597,13 +638,82 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
                 }
             }
 
+            /// <summary>
+            /// Determines if a property is a sink.
+            /// </summary>
+            /// <param name="propertyReferenceOperation">Property to check if it's a sink.</param>
+            /// <param name="sinkKinds">If the property is a sink, <see cref="HashSet{SinkInfo}"/> containing the kinds of sinks; null otherwise.</param>
+            /// <returns>True if the property is a sink, false otherwise.</returns>
+            private bool IsPropertyASink2(IPropertyReferenceOperation propertyReferenceOperation, out HashSet<SinkKind> sinkKinds)
+            {
+                Lazy<HashSet<SinkKind>> lazySinkKinds = new Lazy<HashSet<SinkKind>>(() => new HashSet<SinkKind>());
+                foreach (SinkInfo sinkInfo in this.DataFlowAnalysisContext.SinkInfos.GetInfosForType(propertyReferenceOperation.Member.ContainingType))
+                {
+                    if (lazySinkKinds.IsValueCreated && lazySinkKinds.Value.IsSupersetOf(sinkInfo.SinkKinds))
+                    {
+                        continue;
+                    }
+
+                    if (sinkInfo.SinkProperties.Contains(propertyReferenceOperation.Member.MetadataName))
+                    {
+                        lazySinkKinds.Value.UnionWith(sinkInfo.SinkKinds);
+                    }
+                }
+
+                if (lazySinkKinds.IsValueCreated)
+                {
+                    sinkKinds = lazySinkKinds.Value;
+                    return true;
+                }
+                else
+                {
+                    sinkKinds = null;
+                    return false;
+                }
+            }
+
             private IEnumerable<IArgumentOperation> GetTaintedArguments(ImmutableArray<IArgumentOperation> arguments)
             {
                 return arguments.Where(
-                    a => this.GetCachedAbstractValue(a).Kind == TaintedDataAbstractValueKind.Tainted
+                    a => this.GetCachedAbstractValue1(a).Kind == TaintedDataAbstractValueKind.Tainted
                          && (a.Parameter.RefKind == RefKind.None
                              || a.Parameter.RefKind == RefKind.Ref
                              || a.Parameter.RefKind == RefKind.In));
+                         //|| a.Parameter.Type is IArrayTypeSymbol arrayTypeSymbol
+                         //    && this.DataFlowAnalysisContext.SourceInfos.IsSourceConstantArrayOfType(arrayTypeSymbol) == ArrayKind.All
+                         //    && AnalysisEntityFactory.TryCreate(a, out AnalysisEntity analysisEntity)
+                         //    && (!this.CurrentAnalysisData.TryGetValue(analysisEntity, out TaintedDataAbstractValue value) || value.Kind != TaintedDataAbstractValueKind.NotTainted));
+            }
+
+            public TaintedDataAbstractValue GetCachedAbstractValue1(IOperation operation)
+            {
+                ISymbol symbolOpt = null;
+                switch (operation)
+                {
+                    case IParameterReferenceOperation parameterReference:
+                        symbolOpt = parameterReference.Parameter.Type;
+                        break;
+
+                    case IArgumentOperation argument:
+                        return GetCachedAbstractValue1(argument.Value);
+
+                    default:
+                        break;
+                }
+
+                if (symbolOpt is IArrayTypeSymbol arrayTypeSymbol)
+                {
+                    if (this.DataFlowAnalysisContext.SourceInfos.IsSourceConstantArrayOfType(arrayTypeSymbol) == ArrayKind.All
+                        && AnalysisEntityFactory.TryCreate(operation, out AnalysisEntity analysisEntity)
+                        && (!this.CurrentAnalysisData.TryGetValue(analysisEntity, out TaintedDataAbstractValue value) || value.Kind != TaintedDataAbstractValueKind.NotTainted))
+                    {
+                        var tmp = TaintedDataAbstractValue.CreateTainted(arrayTypeSymbol, operation.Syntax, this.OwningSymbol);
+                        CacheAbstractValue(operation, tmp);
+                        return tmp;
+                    }
+                }
+
+                return this.GetCachedAbstractValue(operation);
             }
 
             private void SetTaintedForEntity(IOperation operation, TaintedDataAbstractValue value)

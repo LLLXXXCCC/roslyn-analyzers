@@ -1212,4 +1212,13 @@
   <data name="DoNotUseCreateEncryptorWithNonDefaultIVDescription" xml:space="preserve">
     <value>Symmetric encryption should always use a non-repeatable initialization vector to prevent dictionary attacks.</value>
   </data>
+  <data name="DoNotDecryptWithoutHash" xml:space="preserve">
+    <value />
+  </data>
+  <data name="DoNotDecryptWithoutHashDescription" xml:space="preserve">
+    <value />
+  </data>
+  <data name="DoNotDecryptWithoutHashMessage" xml:space="preserve">
+    <value />
+  </data>
 </root>

@@ -95,14 +95,14 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
                 taintedProperties: null,
                 taintedMethodsNeedsPointsToAnalysis: null,
                 taintedMethodsNeedsValueContentAnalysis: null,
-                taintConstantArray: true);
+                taintArray: ArrayKind.Constant);
             builder.AddSourceInfo(
                 WellKnownTypeNames.SystemChar,
                 isInterface: false,
                 taintedProperties: null,
                 taintedMethodsNeedsPointsToAnalysis: null,
                 taintedMethodsNeedsValueContentAnalysis: null,
-                taintConstantArray: true);
+                taintArray: ArrayKind.Constant);
 
             SourceInfos = builder.ToImmutableAndFree();
         }
