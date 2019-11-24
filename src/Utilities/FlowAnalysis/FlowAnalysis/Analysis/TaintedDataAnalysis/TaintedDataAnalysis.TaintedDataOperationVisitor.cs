@@ -221,8 +221,6 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
                     invokedAsDelegate,
                     originalOperation,
                     defaultValue);
-
-                ProcessArrayArgument(visitedArguments);
                 IEnumerable<IArgumentOperation> taintedArguments = GetTaintedArguments(visitedArguments);
                 if (taintedArguments.Any())
                 {
@@ -484,17 +482,20 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
 
             private void ProcessAssignmentOperation(IAssignmentOperation assignmentOperation)
             {
-                TaintedDataAbstractValue assignmentValueAbstractValue = this.GetCachedAbstractValue(assignmentOperation.Value);
                 if (assignmentOperation.Target != null
-                    && assignmentValueAbstractValue.Kind == TaintedDataAbstractValueKind.Tainted
                     && assignmentOperation.Target is IPropertyReferenceOperation propertyReferenceOperation
                     && this.IsPropertyASink(propertyReferenceOperation, out HashSet<SinkKind> sinkKinds))
                 {
-                    this.TrackTaintedDataEnteringSink(
-                        propertyReferenceOperation.Member,
-                        propertyReferenceOperation.Syntax.GetLocation(),
-                        sinkKinds,
-                        assignmentValueAbstractValue.SourceOrigins);
+                    CacheAbstractValue(assignmentOperation.Target, ProcessArrayBeforeEnteringSink(assignmentOperation.Value));
+                    TaintedDataAbstractValue assignmentValueAbstractValue = this.GetCachedAbstractValue(assignmentOperation.Value);
+                    if (assignmentValueAbstractValue.Kind == TaintedDataAbstractValueKind.Tainted)
+                    {
+                        this.TrackTaintedDataEnteringSink(
+                            propertyReferenceOperation.Member,
+                            propertyReferenceOperation.Syntax.GetLocation(),
+                            sinkKinds,
+                            assignmentValueAbstractValue.SourceOrigins);
+                    }
                 }
             }
 
@@ -630,6 +631,11 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
 
             private IEnumerable<IArgumentOperation> GetTaintedArguments(ImmutableArray<IArgumentOperation> arguments)
             {
+                foreach (IArgumentOperation arg in arguments)
+                {
+                    CacheAbstractValue(arg, ProcessArrayBeforeEnteringSink(arg.Value));
+                }
+
                 return arguments.Where(
                     a => this.GetCachedAbstractValue(a).Kind == TaintedDataAbstractValueKind.Tainted
                          && (a.Parameter.RefKind == RefKind.None
@@ -647,30 +653,49 @@ namespace Analyzer.Utilities.FlowAnalysis.Analysis.TaintedDataAnalysis
             }
 
             /// <summary>
-            /// Set arguments of array type as tainted when there's <see cref="SourceInfo"/> taint all kinds of array.
+            /// Set array as tainted when there's <see cref="SourceInfo"/> taint all kinds of array before entering sink.
             /// </summary>
-            /// <param name="arguments">All argument operations</param>
-            private void ProcessArrayArgument(ImmutableArray<IArgumentOperation> arguments)
+            /// <param name="value">Operation that could produce array.</param>
+            private TaintedDataAbstractValue ProcessArrayBeforeEnteringSink(IOperation value)
             {
-                foreach (IArgumentOperation argument in arguments)
+                TaintedDataAbstractValue taintedDataAbstractValue = TaintedDataAbstractValue.NotTainted;
+                if (value.Type is IArrayTypeSymbol arrayTypeSymbol
+                    && this.DataFlowAnalysisContext.SourceInfos.IsSourceArray(arrayTypeSymbol, out TaintArrayKind taintArrayKind)
+                    && taintArrayKind == TaintArrayKind.All)
                 {
-                    if (argument.Parameter.Type is IArrayTypeSymbol arrayTypeSymbol
-                        && this.DataFlowAnalysisContext.SourceInfos.IsSourceArray(arrayTypeSymbol, out TaintArrayKind taintArrayKind)
-                        && taintArrayKind == TaintArrayKind.All)
+                    if (AnalysisEntityFactory.TryCreate(value, out AnalysisEntity analysisEntity))
                     {
-                        TaintedDataAbstractValue value = TaintedDataAbstractValue.CreateTainted(argument.Parameter.OriginalDefinition, argument.Syntax, this.OwningSymbol);
-                        if (AnalysisEntityFactory.TryCreate(argument, out AnalysisEntity analysisEntity))
+                        if (!this.CurrentAnalysisData.TryGetValue(analysisEntity, out taintedDataAbstractValue))
                         {
-                            if (!this.CurrentAnalysisData.TryGetValue(analysisEntity, out value))
-                            {
-                                value = TaintedDataAbstractValue.CreateTainted(analysisEntity.SymbolOpt, analysisEntity.SymbolOpt.DeclaringSyntaxReferences.FirstOrDefault().GetSyntax(), this.OwningSymbol);
-                                SetAbstractValue(analysisEntity, value);
-                            }
+                            taintedDataAbstractValue = TaintedDataAbstractValue.CreateTainted(analysisEntity.SymbolOpt, analysisEntity.SymbolOpt.DeclaringSyntaxReferences.FirstOrDefault().GetSyntax(), this.OwningSymbol);
+                            SetAbstractValue(analysisEntity, taintedDataAbstractValue);
+                        }
+                    }
+                    else
+                    {
+                        ISymbol taintedSymbol = null;
+                        switch (value)
+                        {
+                            case IInvocationOperation invocationOperation:
+                                taintedSymbol = invocationOperation.TargetMethod;
+                                break;
+
+                            case IArrayCreationOperation arrayCreationOperation:
+                                taintedSymbol = arrayCreationOperation.Type;
+                                break;
+
+                            default:
+                                break;
                         }
 
-                        CacheAbstractValue(argument, value);
+                        if (taintedSymbol != null)
+                        {
+                            taintedDataAbstractValue = TaintedDataAbstractValue.CreateTainted(taintedSymbol, value.Syntax, this.OwningSymbol);
+                        }
                     }
                 }
+
+                return taintedDataAbstractValue;
             }
 
             protected override void ApplyInterproceduralAnalysisResultCore(TaintedDataAnalysisData resultData)
